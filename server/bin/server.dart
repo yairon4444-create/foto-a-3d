@@ -91,7 +91,7 @@ Future<void> main() async {
 
       try {
         final job = await meshyClient.getImageTo3DTask(jobId);
-        return _jsonResponse(job.toJson());
+        return _jsonResponse(job.toJson(serviceBaseUrl: _serviceBaseUrl(request)));
       } on MeshyApiException catch (error) {
         return _jsonResponse(
           {'error': error.message},
@@ -117,7 +117,7 @@ Future<void> main() async {
       }
 
       return Response.ok(
-        _streamJobUpdates(meshyClient, jobId),
+        _streamJobUpdates(meshyClient, jobId, _serviceBaseUrl(request)),
         headers: {
           HttpHeaders.contentTypeHeader: 'text/event-stream',
           HttpHeaders.cacheControlHeader: 'no-cache',
@@ -125,6 +125,45 @@ Future<void> main() async {
           'X-Accel-Buffering': 'no',
         },
       );
+    })
+    ..get('/v1/assets', (Request request) async {
+      final remoteUrl = request.requestedUri.queryParameters['url'];
+      if (remoteUrl == null || remoteUrl.isEmpty) {
+        return _jsonResponse(
+          {'error': 'url query parameter is required'},
+          statusCode: HttpStatus.badRequest,
+        );
+      }
+
+      final parsedUrl = Uri.tryParse(remoteUrl);
+      if (parsedUrl == null ||
+          !(parsedUrl.scheme == 'https' || parsedUrl.scheme == 'http')) {
+        return _jsonResponse(
+          {'error': 'url must be a valid http or https URL'},
+          statusCode: HttpStatus.badRequest,
+        );
+      }
+
+      try {
+        final proxied = await meshyClient.proxyAsset(parsedUrl);
+        return Response.ok(
+          proxied.bytes,
+          headers: {
+            HttpHeaders.contentTypeHeader: proxied.contentType,
+            HttpHeaders.cacheControlHeader: 'public, max-age=3600',
+          },
+        );
+      } on MeshyApiException catch (error) {
+        return _jsonResponse(
+          {'error': error.message},
+          statusCode: error.statusCode,
+        );
+      } catch (error) {
+        return _jsonResponse(
+          {'error': 'Unexpected asset proxy error: $error'},
+          statusCode: HttpStatus.internalServerError,
+        );
+      }
     });
 
   final handler = const Pipeline()
@@ -136,13 +175,17 @@ Future<void> main() async {
   stdout.writeln('API listening on http://${server.address.host}:${server.port}');
 }
 
-Stream<List<int>> _streamJobUpdates(MeshyClient meshyClient, String jobId) async* {
+Stream<List<int>> _streamJobUpdates(
+  MeshyClient meshyClient,
+  String jobId,
+  String serviceBaseUrl,
+) async* {
   yield utf8.encode('retry: 2000\n\n');
 
   while (true) {
     try {
       final job = await meshyClient.getImageTo3DTask(jobId);
-      final payload = jsonEncode(job.toJson());
+      final payload = jsonEncode(job.toJson(serviceBaseUrl: serviceBaseUrl));
       yield utf8.encode('event: message\ndata: $payload\n\n');
 
       if (job.status == 'completed' || job.status == 'failed') {
@@ -165,6 +208,10 @@ Stream<List<int>> _streamJobUpdates(MeshyClient meshyClient, String jobId) async
 
     await Future<void>.delayed(const Duration(seconds: 2));
   }
+}
+
+String _serviceBaseUrl(Request request) {
+  return '${request.requestedUri.scheme}://${request.requestedUri.authority}';
 }
 
 class MeshyClient {
@@ -263,6 +310,26 @@ class MeshyClient {
     return JobView.fromMeshy(body);
   }
 
+  Future<ProxiedAsset> proxyAsset(Uri assetUrl) async {
+    _ensureConfigured();
+
+    final response = await _httpClient.get(assetUrl);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw MeshyApiException(
+        statusCode: response.statusCode,
+        message: 'Could not load the generated model asset from Meshy.',
+      );
+    }
+
+    final contentType =
+        response.headers[HttpHeaders.contentTypeHeader] ?? 'model/gltf-binary';
+
+    return ProxiedAsset(
+      bytes: response.bodyBytes,
+      contentType: contentType,
+    );
+  }
+
   Map<String, String> get _headers {
     return {
       HttpHeaders.authorizationHeader: 'Bearer $_apiKey',
@@ -323,19 +390,33 @@ class JobView {
   final int? progress;
   final String? errorMessage;
 
-  Map<String, Object?> toJson() {
+  Map<String, Object?> toJson({String? serviceBaseUrl}) {
+    final resolvedModelUrl = serviceBaseUrl != null && modelUrl != null
+        ? '$serviceBaseUrl/v1/assets?url=${Uri.encodeQueryComponent(modelUrl!)}'
+        : modelUrl;
+
     return {
       'jobId': jobId,
       'status': status,
       'createdAt': createdAt,
       'completedAt': completedAt,
-      'modelUrl': modelUrl,
+      'modelUrl': resolvedModelUrl,
       'thumbnailUrl': thumbnailUrl,
       'prompt': prompt,
       'progress': progress,
       'errorMessage': errorMessage,
     };
   }
+}
+
+class ProxiedAsset {
+  const ProxiedAsset({
+    required this.bytes,
+    required this.contentType,
+  });
+
+  final List<int> bytes;
+  final String contentType;
 }
 
 class MeshyApiException implements Exception {
