@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_3d_controller/flutter_3d_controller.dart';
 import 'package:http/http.dart' as http;
+import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 void main() {
   runApp(const PhotoTo3DApp());
@@ -118,6 +119,7 @@ class _HomePageState extends State<HomePage> {
         _modelUrl = null;
         _thumbnailUrl = null;
         _progress = null;
+        _errorMessage = null;
         _statusText = 'Imagen lista para enviar.';
       });
 
@@ -394,7 +396,7 @@ class _HomePageState extends State<HomePage> {
         final suffix = progress == null ? '' : ' ($progress%)';
         return 'Procesando imagen para convertirla en 3D...$suffix';
       case 'completed':
-        return 'Modelo generado. Ya puedes usar la URL del resultado.';
+        return 'Modelo generado. Ya puedes verlo en la app.';
       case 'failed':
         return 'El backend marco el trabajo como fallido.';
       default:
@@ -642,8 +644,8 @@ class _HomePageState extends State<HomePage> {
                           if (_progress != null)
                             _InfoRow(label: 'Progreso', value: '$_progress%'),
                           if (_modelUrl != null)
-                            SelectableText(
-                              'Resultado: $_modelUrl',
+                            Text(
+                              'El modelo ya se cargo dentro de la vista previa.',
                               style: theme.textTheme.bodyMedium,
                             ),
                           if (_errorMessage != null) ...[
@@ -720,6 +722,24 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildPreview(ThemeData theme) {
     if (_modelUrl != null) {
+      if (kIsWeb) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: ModelViewer(
+            key: ValueKey(_modelUrl),
+            src: _modelUrl!,
+            alt: 'Modelo 3D generado',
+            autoRotate: true,
+            autoPlay: true,
+            disableZoom: false,
+            disableTap: false,
+            cameraControls: true,
+            backgroundColor: const Color(0xFFF8FAFC),
+            loading: Loading.eager,
+          ),
+        );
+      }
+
       if (_supportsEmbeddedViewer) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(24),
