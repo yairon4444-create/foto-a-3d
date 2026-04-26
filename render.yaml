@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: proyecto3d-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - server/**
+    envVars:
+      - key: MESHY_API_KEY
+        sync: false

@@ -1,0 +1,12 @@
+name: photo_to_3d_api
+description: Backend MVP en Dart para recibir fotos y simular la generacion de modelos 3D.
+publish_to: none
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  http: ^1.5.0
+  path: ^1.9.1
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
